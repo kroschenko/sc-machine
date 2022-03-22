@@ -24,7 +24,7 @@ def _verify_user_info_in_database(database: DataBase, name: str, password: str) 
     return message_desc
 
 def _check_if_user_in_base(database: DataBase, name: str) -> str:
-    if database.is_such_user_in_base(name):
+    if not database.is_such_user_in_base(name):
         message_desc = cnt.MSG_USER_NOT_FOUND
     else:
         message_desc = cnt.MSG_ALL_DONE
@@ -199,6 +199,97 @@ async def delete_kb_user(username: str):
             print(response)
 
 
+async def update_kb_user(username: str, new_username: str):
+    async with websockets.connect('ws://localhost:8090/ws_json') as ws:
+        payload = [
+                {
+                    "command": "find",
+                    "idtf": "nrel_login"
+                },
+            ]
+        resolve_ui_user = {"id": 1, "type": "keynodes", "payload": payload}
+        await ws.send(json.dumps(resolve_ui_user))
+        response = await ws.recv()
+        login_addr = json.loads(response)["payload"][0]
+
+        payload = [
+                {
+                    "command": "find",
+                    "data": username
+                }
+                ]
+        get_login_links = {"id": 2, "type": "content", "payload": payload}
+        await ws.send(json.dumps(get_login_links))
+        response = await ws.recv()
+        print(response)
+        links = json.loads(response)['payload']
+
+        for link in links[0]:
+            templ = []
+            triple = []
+
+            triple = []
+            triple.append(
+                    {
+                    "type": "alias",
+                    "value": "_user"
+                    })
+            triple.append(
+                    {
+                    "type": "type",
+                    "value": ScType.EdgeDCommonVar.ToInt(),
+                    "alias": "_link_edge"
+                    })
+            triple.append(
+                    {
+                    "type": "addr",
+                    "value": link,
+                    "alias": "_link"
+                    })
+            templ.append(triple)
+
+            triple = []
+            triple.append(
+                    {
+                    "type": "addr",
+                    "value": login_addr,
+                    })
+            triple.append(
+                    {
+                    "type": "type",
+                    "value": ScType.EdgeAccessVarPosPerm.ToInt(),
+                    "alias": "_login_edge"
+                    })
+            triple.append(
+                    {
+                    "type": "alias",
+                    "value": "_link_edge"
+                    })
+            templ.append(triple)
+
+            print(payload)
+            template_search = {"id": 3, "type": "search_template", "payload": templ}
+            await ws.send(json.dumps(template_search))
+            response = json.loads(await ws.recv())['payload']
+            print(response)
+            aliases = response['aliases']
+            print(aliases.values())
+            addrs = response['addrs']
+            print(addrs[0])
+
+            link_addr = addrs[0][aliases['_link']]
+            payload = [
+                    {
+                    "command": "set",
+                    "addr": link_addr,
+                    "type": "string",
+                    "data": new_username
+                    }
+                    ]
+            update_link = {"id": 4, "type": "content", "payload": payload}
+            await ws.send(json.dumps(update_link))
+            response = json.loads(await ws.recv())['payload']
+            print(response)
 
 
 class UserHandler(BaseHandler):
@@ -230,8 +321,6 @@ class UserHandler(BaseHandler):
                 cnt.ID: human_info[cnt.ID],
                 cnt.NAME: human_info[cnt.NAME]
             })
-
-
         else:
             response = get_response_message(cnt.MSG_USER_NOT_FOUND)
         self.write(response)
@@ -247,7 +336,7 @@ class UserHandler(BaseHandler):
         else:
             response = get_response_message(cnt.MSG_ALL_DONE)
             loop = asyncio.get_event_loop()
-            loop.create_task(delete_kb_user(""))
+            loop.create_task(delete_kb_user(request_params[cnt.NAME]))
         self.write(response)
 
     @TokenValidator.validate_typed_token(TokenType.ACCESS)
@@ -270,6 +359,9 @@ class UserHandler(BaseHandler):
             updates_users_count = database.update_user_by_name(**request_params)
             if updates_users_count == 0:
                 response = get_response_message(cnt.MSG_USER_NOT_FOUND)
+            else:
+                loop = asyncio.get_event_loop()
+                loop.create_task(update_kb_user(request_params[cnt.NAME], request_params[cnt.NEW_NAME]))
         self.write(response)
 
 
